@@ -1,0 +1,32 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+build/
+dist/
+
+# Environments
+.venv/
+.env
+.env.local
+
+# Local secrets (never commit printer credentials)
+config.yaml
+
+# Runtime data
+events/
+frames/
+/dataset/
+models/*.onnx
+models/*.mlpackage
+models/*.mlmodel
+!models/.gitkeep
+
+# uv
+uv.lock.bak
+
+# OS / editor
+.DS_Store
+.idea/
+.vscode/

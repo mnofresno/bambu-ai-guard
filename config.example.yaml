@@ -1,0 +1,47 @@
+# bambu-ai-guard configuration
+# Copy to config.yaml and fill in real values. config.yaml is gitignored.
+# Values may reference environment variables: ${VAR} or ${VAR:-default}.
+
+printer:
+  host: ${BAMBU_HOST:-192.168.1.100}
+  serial: ${BAMBU_SERIAL}
+  access_code: ${BAMBU_ACCESS_CODE}
+  mqtt_port: 8883
+
+camera:
+  provider: bambu            # bambu | file | mock
+  port: 6000
+  inference_fps: 1           # 0.2 | 0.5 | 1 | 2
+  file_dir: frames           # used when provider: file
+
+vision:
+  provider: onnx             # onnx | mock | remote_openai_compatible
+  model: models/yolov8n.onnx
+  backend: coreml            # coreml | cpu | mps (onnxruntime execution providers)
+  input_size: 640
+  confidence_threshold: 0.35
+  # remote provider:
+  # base_url: http://localhost:11434/v1
+  # api_key: ${REMOTE_API_KEY}
+  # model_name: qwen2.5-vl:7b
+
+decision:
+  pause_threshold: 0.90
+  consecutive_frames: 3
+  observation_window_seconds: 15
+  cooldown_seconds: 60
+
+actions:
+  auto_pause: false          # false = shadow mode (detect + log only)
+
+server:
+  host: 127.0.0.1
+  port: 8710
+
+events:
+  dir: events
+  ring_buffer_size: 30       # frames kept for before/trigger/after evidence
+
+logging:
+  level: INFO
+  file: logs/bambu-ai.log
