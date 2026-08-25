@@ -18,6 +18,12 @@ config.yaml
 /events/
 /frames/
 /dataset/
+
+# Test / local artifacts
+test_camera.jpg
+roi_*.jpg
+ui_screenshot.png
+*.log
 models/*.onnx
 models/*.mlpackage
 models/*.mlmodel
