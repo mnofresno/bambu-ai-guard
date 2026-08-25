@@ -15,8 +15,8 @@ dist/
 config.yaml
 
 # Runtime data
-events/
-frames/
+/events/
+/frames/
 /dataset/
 models/*.onnx
 models/*.mlpackage
