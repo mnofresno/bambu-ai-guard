@@ -3,10 +3,14 @@
 The A1 (unlike X1) has no RTSP/MJPEG endpoint. It serves JPEG frames over a
 plain TLS socket on port 6000: a binary handshake (32-char "bblp" username +
 32-char access code, little-endian, zero padded) followed by a continuous
-stream where each JPEG is preceded by a 16-byte header (LE payload size).
+stream where each JPEG is preceded by framing bytes. Frames arrive roughly
+every 1-2 s.
 
 Protocol reference: bambu-connect (mattcar15) and the pybambu library that
-ships inside greghesp/ha-bambulab. Frames arrive roughly every 1-2 s.
+ships inside greghesp/ha-bambulab.
+
+The blocking socket I/O runs in a dedicated worker thread so it never blocks
+the asyncio event loop; frames are handed out through a thread-safe buffer.
 """
 from __future__ import annotations
 
@@ -15,7 +19,9 @@ import logging
 import socket
 import ssl
 import struct
+import threading
 import time
+from collections import deque
 
 from ..models import Frame
 from .base import CameraProvider
@@ -46,8 +52,7 @@ def extract_jpeg(buf: bytearray, start: int) -> tuple[bytes | None, int]:
         return None, start
     eoi = buf.find(JPEG_EOI, soi + len(JPEG_SOI))
     if eoi == -1:
-        # keep the partial frame for the next read
-        return None, soi
+        return None, soi  # keep partial frame for the next read
     return bytes(buf[soi : eoi + len(JPEG_EOI)]), eoi + len(JPEG_EOI)
 
 
@@ -57,42 +62,59 @@ class BambuCamera(CameraProvider):
         self.access_code = access_code
         self.port = port
         self._latest: Frame | None = None
-        self._connected = False
-        self._task: asyncio.Task | None = None
         self._last_frame_at = 0.0
+        self._connected = False
+        self._stop = threading.Event()
+        self._thread: threading.Thread | None = None
+        self._lock = threading.Lock()
+        self._frames: deque[Frame] = deque(maxlen=16)
+        self._seq = 0
+        self._last_returned = 0
 
     @property
     def is_connected(self) -> bool:
         return self._connected
 
     async def connect(self) -> None:
-        self._task = asyncio.get_running_loop().create_task(self._run())
+        self._stop.clear()
+        self._thread = threading.Thread(target=self._worker, daemon=True)
+        self._thread.start()
 
     async def close(self) -> None:
+        self._stop.set()
+        if self._thread:
+            self._thread.join(timeout=3)
+            self._thread = None
         self._connected = False
-        if self._task:
-            self._task.cancel()
-            try:
-                await self._task
-            except (asyncio.CancelledError, Exception):
-                pass
-            self._task = None
 
     async def get_frame(self, timeout: float = 10.0) -> Frame:
-        """Wait for the latest frame; timeout if the stream is silent."""
+        """Return the newest frame not yet returned; wait up to `timeout`."""
         deadline = time.monotonic() + timeout
         while time.monotonic() < deadline:
-            if self._latest and self._last_frame_at >= time.monotonic() - 5.0:
-                return self._latest
-            await asyncio.sleep(0.1)
-        if self._latest:
-            return self._latest
+            with self._lock:
+                if self._seq > self._last_returned and self._frames:
+                    frame = self._frames[-1]
+                    self._last_returned = self._seq
+                    return frame
+            await asyncio.sleep(0.05)
+        with self._lock:
+            if self._frames:
+                return self._frames[-1]
         raise TimeoutError(f"no camera frame from {self.host} within {timeout:.0f}s")
 
-    # -- internals ---------------------------------------------------------
+    # -- internals (worker thread) -----------------------------------------
+
+    def _worker(self) -> None:
+        while not self._stop.is_set():
+            try:
+                self._stream_once()
+            except Exception:
+                log.exception("camera stream error; retrying in 5s")
+            self._connected = False
+            self._stop.wait(5)
 
     def _socket_read(self, sock: socket.socket, buf: bytearray) -> bytes | None:
-        """Blocking read loop over a TLS socket; returns one complete JPEG."""
+        """Blocking read over a TLS socket; returns one complete JPEG."""
         while True:
             chunk = sock.recv(4096)
             if not chunk:
@@ -102,15 +124,6 @@ class BambuCamera(CameraProvider):
             if img is not None:
                 del buf[:new_start]
                 return img
-
-    async def _run(self) -> None:
-        while True:
-            try:
-                self._stream_once()
-            except Exception:
-                log.exception("camera stream error; retrying in 5s")
-            self._connected = False
-            await asyncio.sleep(5)
 
     def _stream_once(self) -> None:
         ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
@@ -122,9 +135,16 @@ class BambuCamera(CameraProvider):
                 log.info("camera connected: %s:%s", self.host, self.port)
                 self._connected = True
                 buf = bytearray()
-                while self._connected:
+                while not self._stop.is_set():
                     img = self._socket_read(ssock, buf)
                     if img is None:
                         break
-                    self._latest = Frame(data=img, timestamp=time.time())
-                    self._last_frame_at = time.monotonic()
+                    self._on_frame(img)
+
+    def _on_frame(self, img: bytes) -> None:
+        frame = Frame(data=img, timestamp=time.time())
+        self._last_frame_at = time.monotonic()
+        with self._lock:
+            self._frames.append(frame)
+            self._seq += 1
+        self._latest = frame
