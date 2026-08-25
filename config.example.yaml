@@ -13,6 +13,15 @@ camera:
   port: 6000
   inference_fps: 1           # 0.2 | 0.5 | 1 | 2
   file_dir: frames           # used when provider: file
+  # Optional ROI polygon (normalized 0..1) restricting analysis to the build
+  # area. Removes room background so it can't cause false positives. Empty =
+  # no masking. Add headroom above the bed for tall prints; recalibrate only
+  # if you move the printer. Example (A1, camera default angle):
+  # roi:
+  #   - [0.35, 0.20]
+  #   - [0.70, 0.20]
+  #   - [1.00, 0.85]
+  #   - [0.00, 0.85]
 
 vision:
   provider: onnx             # onnx | mock | remote_openai_compatible

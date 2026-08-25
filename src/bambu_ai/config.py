@@ -45,6 +45,8 @@ class Config:
     camera_port: int = 6000
     inference_fps: float = 1.0
     camera_file_dir: str = "frames"
+    # ROI polygon in normalized [0,1] coords; empty = no masking
+    camera_roi: list = field(default_factory=list)
 
     # vision
     vision_provider: str = "onnx"
@@ -100,6 +102,7 @@ class Config:
             camera_port=int(c.get("port", 6000)),
             inference_fps=float(c.get("inference_fps", 1.0)),
             camera_file_dir=str(c.get("file_dir", "frames")),
+            camera_roi=c.get("roi", []),
             vision_provider=str(v.get("provider", "onnx")),
             vision_model=str(v.get("model", "models/yolov8n.onnx")),
             vision_backend=str(v.get("backend", "coreml")),
