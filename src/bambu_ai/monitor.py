@@ -13,9 +13,9 @@ from .camera import CameraProvider
 from .config import Config
 from .decision import DecisionConfig, DecisionEngine
 from .events import EventRecorder
-from .models import DetectionContext, GuardState, PrinterStatus
+from .models import DetectionContext, Frame, GuardState, PrinterState, PrinterStatus
 from .printer import PrinterController
-from .temporal import TemporalAnalyzer
+from .temporal import TemporalAnalyzer, TemporalSignals
 from .vision import VisionModel
 
 log = logging.getLogger("bambu_ai.monitor")
@@ -114,6 +114,8 @@ class Monitor:
         self.recorder.push_frame(frame)
         self.status.frames_processed += 1
         self.status.last_frame_ts = frame.timestamp
+        if self.cfg.camera_roi:
+            frame.bgr = self._apply_roi(frame)
         log.debug(EVT["frame_sampled"])
 
         try:
@@ -130,7 +132,17 @@ class Monitor:
         self.status.last_inference_ms = result.latency_ms
         log.debug(EVT["inference_completed"] + f" latency_ms={result.latency_ms:.1f}")
 
-        tsignals = self.temporal.update(result, now=frame.timestamp)
+        # Temporal failure signals only make sense while the print is active.
+        # While idle, motion in the room (people, furniture) is NOT a print
+        # failure — reset the tracker so it can't accumulate a false positive.
+        printing = status.state in (PrinterState.PRINTING, PrinterState.PAUSED)
+        if printing:
+            tsignals = self.temporal.update(result, now=frame.timestamp)
+        else:
+            self.temporal.reset()
+            tsignals = TemporalSignals()
+            if self.decision.state in (GuardState.SUSPICIOUS, GuardState.CONFIRMED_FAILURE):
+                self.decision.mark_resumed()
         risk, failure = self.decision.combined_risk(result.signal_scores, tsignals)
         self.status.last_signals = {**result.signal_scores,
                                     "object_displacement": tsignals.object_displacement,
@@ -156,6 +168,15 @@ class Monitor:
             self._record(frame, failure, risk, "would_pause")
 
     # -- actions -------------------------------------------------------------
+
+    def _apply_roi(self, frame: "Frame") -> "object":
+        import io
+        import numpy as np
+        from PIL import Image
+        from .roi import apply_roi
+
+        img = Image.open(io.BytesIO(frame.data)).convert("RGB")
+        return apply_roi(np.asarray(img, dtype=np.uint8), self.cfg.camera_roi)
 
     async def _do_pause(self, failure: str, risk: float, status: PrinterStatus) -> None:
         # re-verify before touching the printer
