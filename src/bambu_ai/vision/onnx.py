@@ -24,6 +24,10 @@ DEFAULT_LABEL_MAP: dict[str, str] = {
     "adhesion_loss": "adhesion_loss",
     "collapse": "collapse",
     "air_printing": "air_printing",
+    "purge": "purge_waste",
+    "purge_waste": "purge_waste",
+    "filament_waste": "purge_waste",
+    "waste": "purge_waste",
     "object": "object",
     "part": "object",
     "bottle": "object",
@@ -32,7 +36,7 @@ DEFAULT_LABEL_MAP: dict[str, str] = {
 }
 
 VALID_FAILURE_SIGNALS = (
-    "spaghetti", "blob", "adhesion_loss", "collapse", "air_printing", "object",
+    "spaghetti", "blob", "adhesion_loss", "collapse", "air_printing", "purge_waste", "object",
 )
 
 # COCO class names (80) for pretrained weights; failure weights override via label_map.
@@ -71,6 +75,7 @@ class OnnxYoloModel(VisionModel):
         self._input_name = "images"
         self._class_names: list[str] = []
         self._num_classes = 80
+        self._transform: tuple[float, int, int, int, int] | None = None
 
     def _execution_providers(self) -> list[tuple[str, dict]]:
         eps: list[tuple[str, dict]] = []
@@ -100,10 +105,12 @@ class OnnxYoloModel(VisionModel):
 
     def _infer_num_classes(self) -> int:
         out = self._session.get_outputs()[0]
-        dims = [d for d in out.shape if isinstance(d, int) and d > 0]
-        for d in dims:
-            if d >= 5:
-                return d - 4
+        shape = list(out.shape)
+        if len(shape) >= 3:
+            candidates = [d for d in shape[1:] if isinstance(d, int) and d >= 5]
+            if candidates:
+                attrs = min(candidates)
+                return attrs - 4
         return 80
 
     async def close(self) -> None:
@@ -147,6 +154,7 @@ class OnnxYoloModel(VisionModel):
         )
         canvas = np.zeros((size, size, 3), dtype=np.uint8)
         pad_x, pad_y = (size - new_w) // 2, (size - new_h) // 2
+        self._transform = (scale, pad_x, pad_y, w, h)
         canvas[pad_y : pad_y + new_h, pad_x : pad_x + new_w] = resized
         blob = canvas.transpose(2, 0, 1)[np.newaxis, ...].astype(np.float32) / 255.0
         return blob
@@ -163,6 +171,12 @@ class OnnxYoloModel(VisionModel):
             if conf < self.confidence:
                 continue
             cx, cy, bw, bh = (float(v) for v in boxes[:, i])
+            if self._transform:
+                scale, pad_x, pad_y, orig_w, orig_h = self._transform
+                cx = (cx - pad_x) / scale / orig_w
+                cy = (cy - pad_y) / scale / orig_h
+                bw = bw / scale / orig_w
+                bh = bh / scale / orig_h
             det.append((
                 self._class_names[cls_id] if cls_id < len(self._class_names) else f"cls_{cls_id}",
                 conf,

@@ -7,6 +7,10 @@ printer:
   serial: ${BAMBU_SERIAL}
   access_code: ${BAMBU_ACCESS_CODE}
   mqtt_port: 8883
+  # Prefer a trusted CA/pinned certificate. `tls_insecure` is only for a
+  # trusted isolated LAN with the printer's self-signed certificate.
+  tls_ca_file: ${BAMBU_TLS_CA_FILE:-}
+  tls_insecure: false
 
 camera:
   provider: bambu            # bambu | file | mock
@@ -20,6 +24,8 @@ vision:
   backend: coreml            # coreml | cpu | mps (onnxruntime execution providers)
   input_size: 640
   confidence_threshold: 0.35
+  # For a fine-tuned model, map its purge class to the safety signal:
+  # label_map: models/labels.json  # {"purge_waste": "purge_waste"}
   # remote provider:
   # base_url: http://localhost:11434/v1
   # api_key: ${REMOTE_API_KEY}
@@ -37,6 +43,8 @@ actions:
 server:
   host: 127.0.0.1
   port: 8710
+  # Required when host is not loopback. Also accepted as BAMBU_AI_AUTH_TOKEN.
+  auth_token: ${BAMBU_AI_AUTH_TOKEN:-}
 
 events:
   dir: events

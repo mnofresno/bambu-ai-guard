@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from conftest import fallen_frame, moved_frame, normal_frame
+from bambu_ai.models import Detection
 
 
 def test_stable_object_no_displacement(analyzer):
@@ -50,3 +51,10 @@ def test_reset_clears_state(analyzer):
     analyzer.reset()
     assert analyzer._baseline is None
     assert analyzer._object_count == 0
+
+
+def test_purge_waste_detection_is_preserved_as_failure_signal(analyzer):
+    result = normal_frame()
+    result.detections.append(Detection(label="purge_waste", confidence=0.91, bbox=(0.05, 0.7, 0.12, 0.08)))
+    signals = analyzer.update(result, now=0)
+    assert signals.purge_waste == 0.91

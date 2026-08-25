@@ -24,16 +24,19 @@ def _load_config(path: str) -> Config:
 
 
 def _setup_logging(cfg: Config) -> None:
+    Path(cfg.log_file).parent.mkdir(parents=True, exist_ok=True)
     logging.basicConfig(
         level=getattr(logging, cfg.log_level.upper(), logging.INFO),
         format="%(asctime)s %(levelname)s %(name)s %(message)s",
+        handlers=[logging.StreamHandler(), logging.FileHandler(cfg.log_file)],
     )
 
 
 def _build_camera(cfg: Config):
     if cfg.camera_provider == "bambu":
         from .camera import BambuCamera
-        return BambuCamera(cfg.printer_host, cfg.printer_access_code, cfg.camera_port)
+        return BambuCamera(cfg.printer_host, cfg.printer_access_code, cfg.camera_port,
+                           ca_file=cfg.printer_tls_ca_file, tls_insecure=cfg.printer_tls_insecure)
     if cfg.camera_provider == "file":
         from .camera import FileCamera
         return FileCamera(cfg.camera_file_dir, interval=1.0 / max(0.05, cfg.inference_fps))
@@ -42,11 +45,13 @@ def _build_camera(cfg: Config):
 
 
 def _build_printer(cfg: Config):
-    if cfg.camera_provider == "mock":
+    if cfg.raw.get("printer", {}).get("provider", "bambu") == "mock":
         from .printer import MockPrinter
         return MockPrinter()
     from .printer import BambuPrinter
-    return BambuPrinter(cfg.printer_host, cfg.printer_serial, cfg.printer_access_code, cfg.printer_mqtt_port)
+    return BambuPrinter(cfg.printer_host, cfg.printer_serial, cfg.printer_access_code,
+                        cfg.printer_mqtt_port, ca_file=cfg.printer_tls_ca_file,
+                        tls_insecure=cfg.printer_tls_insecure)
 
 
 # -- commands ----------------------------------------------------------------

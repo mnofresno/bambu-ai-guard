@@ -13,6 +13,7 @@ class FailureType(str, Enum):
     ADHESION_LOSS = "adhesion_loss"
     COLLAPSE = "collapse"
     AIR_PRINTING = "air_printing"
+    PURGE_WASTE = "purge_waste"
     OBJECT_DISPLACEMENT = "object_displacement"
 
 

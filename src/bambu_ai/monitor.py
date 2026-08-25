@@ -110,6 +110,10 @@ class Monitor:
             log.info("monitor stopped")
 
     async def _tick(self) -> None:
+        if not self.status.enabled:
+            self.temporal.reset()
+            self.decision.mark_resumed()
+            return
         frame = await self.camera.get_frame()
         self.recorder.push_frame(frame)
         self.status.frames_processed += 1
@@ -136,6 +140,7 @@ class Monitor:
                                     "object_displacement": tsignals.object_displacement,
                                     "collapse": tsignals.collapse,
                                     "air_printing": tsignals.air_printing}
+        self.status.last_signals["purge_waste"] = tsignals.purge_waste
         self.status.last_risk = risk
         self.status.last_failure = failure
 
@@ -160,8 +165,26 @@ class Monitor:
     async def _do_pause(self, failure: str, risk: float, status: PrinterStatus) -> None:
         # re-verify before touching the printer
         fresh = await self.printer.get_status()
-        if fresh.state not in (status.state,):
+        if status.state is not PrinterState.PRINTING or fresh.state is not PrinterState.PRINTING:
             log.info("re-verify: state changed to %s; skip pause", fresh.state)
+            self.decision.mark_resumed()
+            return
+        try:
+            fresh_frame = await self.camera.get_frame(timeout=3)
+            fresh_result = await self.vision.analyze(
+                fresh_frame,
+                DetectionContext(printer_state=fresh.state, elapsed_seconds=fresh.elapsed_seconds),
+            )
+            fresh_risk, fresh_failure = self.decision.combined_risk(
+                fresh_result.signal_scores, TemporalSignals()
+            )
+        except Exception:
+            log.exception("pause re-verification frame failed")
+            self.decision.mark_resumed()
+            return
+        if fresh_failure != failure or fresh_risk < self.decision.cfg.pause_threshold:
+            log.info("re-verify: anomaly cleared or changed; skip pause")
+            self.decision.mark_resumed()
             return
         reason = f"AI failure detected: {failure} (risk={risk:.2f})"
         log.info(EVT["pause_requested"] + f" reason={reason}")
@@ -172,6 +195,7 @@ class Monitor:
             log.info(EVT["pause_success"])
         except Exception:
             log.exception(EVT["pause_failed"])
+            self.decision.mark_resumed()
 
     def _record(self, frame, failure: str, risk: float, decision: str) -> None:
         self.recorder.record(

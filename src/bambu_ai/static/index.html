@@ -118,7 +118,10 @@ async function refreshStatus(){
   const ev=$("events").querySelector("tbody");
   ev.innerHTML="";
   for(const e of (s.events||[])){
-    ev.innerHTML+=`<tr><td>${new Date(e.ts*1000).toLocaleTimeString()}</td><td>${e.type}</td><td class="mono">${e.risk}</td><td>${e.decision}</td></tr>`;
+    const row=document.createElement("tr");
+    [new Date(e.ts*1000).toLocaleTimeString(),e.type,e.risk,e.decision].forEach((v,i)=>{
+      const cell=document.createElement("td"); cell.textContent=String(v); if(i===2) cell.className="mono"; row.appendChild(cell);
+    }); ev.appendChild(row);
   }
 }
 async function refreshFrame(){
@@ -129,8 +132,7 @@ async function refreshFrame(){
 }
 async function post(path){await fetch(path,{method:"POST",headers:{"Content-Type":"application/json"},body:"{}"});}
 $("th").oninput=e=>{$("thval").textContent=(+e.target.value).toFixed(2);};
-$("th").onchange=e=>post("/api/settings");
-const thEl=$("th");thEl.addEventListener("change",()=>post("/api/settings").catch(()=>{}));
+$("th").onchange=e=>fetch("/api/settings",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({threshold:+e.target.value})});
 $("fps").oninput=e=>{$("fpsval").textContent=(+e.target.value).toFixed(1);};
 const fpsEl=$("fps");fpsEl.addEventListener("change",()=>{
   fetch("/api/settings",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({fps:+fpsEl.value})});
@@ -138,7 +140,7 @@ const fpsEl=$("fps");fpsEl.addEventListener("change",()=>{
 $("toggle").onclick=()=>{const cur=$("ai").textContent!=="ENABLED";
   fetch("/api/settings",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({enabled:cur})});};
 $("shadow").onclick=()=>{const cur=!$("mode").textContent.includes("AUTO");
-  fetch("/api/settings",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({auto_pause:cur})});};
+  fetch("/api/settings",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({auto_pause:!cur})});};
 $("pause").onclick=()=>post("/api/pause");
 $("resume").onclick=()=>post("/api/resume");
 setInterval(refreshStatus,1500);
