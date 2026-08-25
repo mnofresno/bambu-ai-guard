@@ -25,6 +25,7 @@ _SEVERITY = {
     "adhesion_loss": 0.9,
     "blob": 0.7,
     "air_printing": 0.8,
+    "purge_waste": 1.0,
 }
 
 
@@ -68,6 +69,7 @@ class DecisionEngine:
         )
         merged["collapse"] = max(merged.get("collapse", 0.0), temporal.collapse)
         merged["air_printing"] = max(merged.get("air_printing", 0.0), temporal.air_printing)
+        merged["purge_waste"] = max(merged.get("purge_waste", 0.0), temporal.purge_waste)
         # drop the neutral "object" signal from risk
         merged.pop("object", None)
         if not merged:
@@ -89,13 +91,17 @@ class DecisionEngine:
         now = now if now is not None else time.time()
         self._peak_risk = max(self._peak_risk, risk)
 
+        printing = printer_state is PrinterState.PRINTING
+        if not printing:
+            self._reset_tracking()
+            if self.state is not GuardState.PAUSED_BY_AI:
+                self.state = GuardState.NORMAL
+            return Decision(self.state, risk, failure_type, "none", "not_printing", now)
+
         # cooldown: ignore new confirmations right after a pause
-        if self.state in (GuardState.PAUSED_BY_AI, GuardState.PAUSING) and \
+        if self.state in (GuardState.PAUSED_BY_AI, GuardState.PAUSING, GuardState.CONFIRMED_FAILURE) and \
                 (now - self._last_pause_ts) < self.cfg.cooldown_seconds:
             return Decision(self.state, risk, failure_type, "none", "cooldown", now)
-
-        # only act on failures while actively printing
-        printing = printer_state in (PrinterState.PRINTING, PrinterState.PAUSED)
 
         if risk >= self.cfg.pause_threshold and failure_type != "none":
             self._count(risk, now)
@@ -153,6 +159,7 @@ class DecisionEngine:
                 now,
             )
         self._last_pause_ts = now
+        self.state = GuardState.CONFIRMED_FAILURE
         self._reset_tracking()
         return Decision(
             self.state, risk, failure_type, "would_pause",
