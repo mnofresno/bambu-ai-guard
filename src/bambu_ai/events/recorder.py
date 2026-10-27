@@ -54,6 +54,10 @@ class EventRecorder:
         ts = trigger.timestamp
         safe = re.sub(r"[^0-9A-Za-z-]+", "", _slug(ts))
         event_dir = self.root / safe
+        suffix = 0
+        while event_dir.exists():
+            suffix += 1
+            event_dir = self.root / f"{safe}-{suffix:02d}"
         event_dir.mkdir(parents=True, exist_ok=True)
 
         before = before if before is not None else self.snapshot(3)

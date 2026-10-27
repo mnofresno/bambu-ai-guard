@@ -30,6 +30,7 @@ log = logging.getLogger(__name__)
 
 JPEG_SOI = b"\xff\xd8"
 JPEG_EOI = b"\xff\xd9"
+MAX_BUFFER_BYTES = 16 * 1024 * 1024
 
 
 def build_auth_packet(username: str, access_code: str) -> bytes:
@@ -57,10 +58,13 @@ def extract_jpeg(buf: bytearray, start: int) -> tuple[bytes | None, int]:
 
 
 class BambuCamera(CameraProvider):
-    def __init__(self, host: str, access_code: str, port: int = 6000):
+    def __init__(self, host: str, access_code: str, port: int = 6000,
+                 ca_file: str = "", tls_insecure: bool = False):
         self.host = host
         self.access_code = access_code
         self.port = port
+        self.ca_file = ca_file
+        self.tls_insecure = tls_insecure
         self._latest: Frame | None = None
         self._last_frame_at = 0.0
         self._connected = False
@@ -98,7 +102,7 @@ class BambuCamera(CameraProvider):
                     return frame
             await asyncio.sleep(0.05)
         with self._lock:
-            if self._frames:
+            if self._frames and self._last_frame_at >= time.monotonic() - 5.0:
                 return self._frames[-1]
         raise TimeoutError(f"no camera frame from {self.host} within {timeout:.0f}s")
 
@@ -120,6 +124,8 @@ class BambuCamera(CameraProvider):
             if not chunk:
                 return None
             buf += chunk
+            if len(buf) > MAX_BUFFER_BYTES:
+                raise ValueError("camera frame buffer exceeded safety limit")
             img, new_start = extract_jpeg(buf, 0)
             if img is not None:
                 del buf[:new_start]
@@ -127,8 +133,13 @@ class BambuCamera(CameraProvider):
 
     def _stream_once(self) -> None:
         ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
-        ctx.check_hostname = False
-        ctx.verify_mode = ssl.CERT_NONE
+        if self.tls_insecure:
+            ctx.check_hostname = False
+            ctx.verify_mode = ssl.CERT_NONE
+        elif self.ca_file:
+            ctx.load_verify_locations(self.ca_file)
+        else:
+            raise ssl.SSLError("camera TLS requires ca_file or explicit tls_insecure=true")
         with socket.create_connection((self.host, self.port), timeout=15) as raw:
             with ctx.wrap_socket(raw, server_hostname=self.host) as ssock:
                 ssock.sendall(build_auth_packet("bblp", self.access_code))

@@ -91,6 +91,13 @@ Key sections: `printer` (host/serial/access_code), `camera`
 (inference_fps), `vision` (provider/model/backend), `decision`
 (thresholds), `actions` (auto_pause), `server`, `events`, `logging`.
 
+The HTTP server remains loopback-only by default. If `server.host` is changed
+to a non-loopback address, `server.auth_token` (or `BAMBU_AI_AUTH_TOKEN`) is
+required and clients must send it as `X-API-Key`. Printer TLS verification is
+required by default; use `printer.tls_ca_file` for the printer CA. The explicit
+`printer.tls_insecure: true` escape hatch is only appropriate on an isolated,
+trusted LAN with the self-signed printer certificate.
+
 ## 6. How to get IP / serial / access code
 
 - **IP** — Bambu Handy → printer → Settings → Network (Wi-Fi/Ethernet).
@@ -203,6 +210,11 @@ excluded from training.
 - **Stock model is not failure-specific.** The bundled YOLOv8n detects generic
   objects. Displacement/collapse (temporal) works today; direct spaghetti/blob
   classification needs a fine-tuned failure model (tooling is included).
+- **Purge waste needs a purge-aware model.** The guard now preserves the
+  `purge_waste` signal and accepts labels such as `purge`, `waste`, and
+  `filament_waste`; the stock COCO model cannot reliably identify a small
+  filament purge by itself, so configure a fine-tuned model/label map before
+  relying on this signal.
 - **Air-printing is a heuristic.** It combines displacement + collapse signals
   and is intentionally conservative; it is not a full nozzle/geometry solver.
 - **Single-camera, fixed viewpoint.** The A1 camera does not move; occlusions

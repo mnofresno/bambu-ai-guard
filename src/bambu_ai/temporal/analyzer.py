@@ -37,6 +37,7 @@ class TemporalSignals:
     object_displacement: float = 0.0
     collapse: float = 0.0
     air_printing: float = 0.0
+    purge_waste: float = 0.0
     details: dict = field(default_factory=dict)
 
 
@@ -97,6 +98,10 @@ class TemporalAnalyzer:
             self._object_count = 0
 
         signals = TemporalSignals()
+        purge_labels = {"purge", "purge_waste", "filament_waste", "waste", "purge_blob"}
+        purge = [d for d in result.detections if d.label.lower() in purge_labels]
+        if purge:
+            signals.purge_waste = max(d.confidence for d in purge)
         if self._baseline is None and self._object_count >= self.stable_frames:
             recent = list(self._history)[-self.stable_frames:]
             self._baseline = _Track(
@@ -140,6 +145,7 @@ class TemporalAnalyzer:
         signals.details = {
             "n_frames": self._object_count,
             "has_baseline": self._baseline is not None,
+            "purge_waste": signals.purge_waste,
         }
         return signals
 

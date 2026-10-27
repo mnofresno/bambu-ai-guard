@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import base64
 import json
+import math
 import time
 
 from ..models import Detection, DetectionContext, DetectionResult, Frame
@@ -75,12 +76,13 @@ class RemoteOpenAIModel(VisionModel):
             start = text.index("{")
             end = text.rindex("}") + 1
             obj = json.loads(text[start:end])
-            return {
-                k: float(obj.get(k, 0.0)) for k in
-                ("spaghetti", "blob", "adhesion_loss", "collapse", "air_printing")
-            } | {"objects": obj.get("objects", [])}
+            scores = {}
+            for k in ("spaghetti", "blob", "adhesion_loss", "collapse", "air_printing", "purge_waste"):
+                value = float(obj.get(k, 0.0))
+                scores[k] = max(0.0, min(1.0, value)) if math.isfinite(value) else 0.0
+            return scores | {"objects": obj.get("objects", [])}
         except (ValueError, json.JSONDecodeError):
             return {
                 "spaghetti": 0.0, "blob": 0.0, "adhesion_loss": 0.0,
-                "collapse": 0.0, "air_printing": 0.0, "objects": [],
+                "collapse": 0.0, "air_printing": 0.0, "purge_waste": 0.0, "objects": [],
             }
